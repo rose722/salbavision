@@ -19,6 +19,7 @@
 # =============================================================================
 
 import os
+import signal
 import time
 import threading
 from collections import deque
@@ -41,9 +42,8 @@ RF_MODEL_ID = "aqw3rfaq3wcqrq2r/9"
 
 # --- Video source ---
 # 0 = webcam | "rtsp://..." = IP camera | r"C:\path\to\video.mp4" = file
-VIDEO_SOURCE = "rtsp://awts11:12345678@192.180.100.30:554/stream1"
-
-MAX_FPS = 15
+# VIDEO_SOURCE = "rtsp://awts11:12345678@192.180.100.30:554/stream1"
+VIDEO_SOURCE = "rtsp://eirmonpaculan11@gmail.com:KURw%DaeM7dB08T7f4Cd@192.168.0.112:554/stream1"
 
 # --- Supabase ---
 SUPABASE_URL = "https://yzohitznmgtzdkzyoztf.supabase.co"
@@ -61,15 +61,53 @@ SWIM_DRAW_THRESHOLD   = 0.45
 DOMINANCE_MARGIN      = 0.21
 HARD_SUPPRESS_MARGIN  = 0.05
 
-STATE_HISTORY_LEN    = 12
+STATE_HISTORY_LEN     = 12
 REQUIRED_DROWN_FRAMES = 2
-ALARM_HOLD           = 5
-ALERT_COOLDOWN       = 10
+ALARM_HOLD            = 5
+ALERT_COOLDOWN        = 10
 
-# --- Display / stream ---
-DISPLAY_WIDTH  = 960
-JPEG_QUALITY   = 80
-FONT_PATH      = "C:/Windows/Fonts/arial.ttf"
+# --- RTSP pre-check timeout (seconds) ---
+RTSP_CHECK_TIMEOUT = 8
+
+# --- Pipeline retry delay on source error (seconds) ---
+PIPELINE_RETRY_DELAY = 10
+
+# --- Display / stream (overridden by hardware profile below) ---
+FONT_PATH = "C:/Windows/Fonts/arial.ttf"
+
+# =============================================================================
+# HARDWARE PROFILE  — auto-detected at startup
+# Sets MAX_FPS / DISPLAY_WIDTH / JPEG_QUALITY based on CPU vs GPU
+# =============================================================================
+
+def _detect_hardware():
+    """Returns (has_gpu: bool, gpu_name: str | None)"""
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return True, torch.cuda.get_device_name(0)
+    except ImportError:
+        pass
+    return False, None
+
+HAS_GPU, GPU_NAME = _detect_hardware()
+
+if HAS_GPU:
+    # GPU — higher throughput
+    MAX_FPS       = 15
+    DISPLAY_WIDTH = 960
+    JPEG_QUALITY  = 80
+    print(f"[HW] GPU detected: {GPU_NAME} — high-performance profile")
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+    os.environ["ONNXRUNTIME_EXECUTION_PROVIDERS"] = (
+        "CUDAExecutionProvider,CPUExecutionProvider"
+    )
+else:
+    # CPU — conservative profile to avoid overloading the machine
+    MAX_FPS       = 8
+    DISPLAY_WIDTH = 640
+    JPEG_QUALITY  = 65
+    print("[HW] No GPU — CPU profile (8 fps, 640px, q65)")
 
 CLASS_COLORS_BGR = {
     "drowning":     (0, 0, 255),
@@ -90,10 +128,10 @@ alarm_active      = False
 alarm_start_time  = 0
 last_alert_time   = 0
 
-# Latest per-frame detection results (written by handle_prediction, read by Flask)
-_latest_preds: list = []
-_latest_frame: np.ndarray = None
-_preds_lock = threading.Lock()
+# Pipeline lifecycle status — read by /status endpoint
+PIPELINE_STATUS  = "starting"   # starting | running | error | stopped
+PIPELINE_ERROR   = None         # last error message if status == error
+_status_lock     = threading.Lock()
 
 # =============================================================================
 # FLASK APP
@@ -414,6 +452,19 @@ def latest_alert_api():
     })
 
 
+@app.route("/status")
+def status_api():
+    with _status_lock:
+        return jsonify({
+            "pipeline": PIPELINE_STATUS,
+            "error":    PIPELINE_ERROR,
+            "source":   str(VIDEO_SOURCE),
+            "hardware": "GPU" if HAS_GPU else "CPU",
+            "fps":      MAX_FPS,
+            "width":    DISPLAY_WIDTH,
+        })
+
+
 # --- Camera management (same as stream_bridge.py) ---
 
 @app.route("/api/cameras", methods=["GET"])
@@ -432,10 +483,9 @@ def add_camera():
         if not data or "id" not in data or "rtsp_url" not in data:
             return jsonify({"error": "Missing required fields"}), 400
         cam_data = {
-            "id":       data["id"],
-            "rtsp_url": data["rtsp_url"],
+            "id":        data["id"],
+            "rtsp_url":  data["rtsp_url"],
             "is_active": data.get("is_active", True),
-            "name":     data.get("name", data["id"]),
         }
         res = supabase.table("cameras").upsert(cam_data, on_conflict=["id"]).execute()
         return jsonify(res.data), 200
@@ -459,8 +509,7 @@ def delete_camera(cam_id):
 def register_camera():
     try:
         supabase.table("cameras").upsert(
-            {"id": "CCTV1", "rtsp_url": str(VIDEO_SOURCE),
-             "is_active": True, "name": "CCTV Camera 1"},
+            {"id": "CCTV1", "rtsp_url": str(VIDEO_SOURCE), "is_active": True},
             on_conflict=["id"],
         ).execute()
         print("Camera registered in Supabase")
@@ -468,34 +517,99 @@ def register_camera():
         print("Camera registration error:", e)
 
 
-if __name__ == "__main__":
-    # GPU check
+def _check_rtsp(url: str, timeout: int = RTSP_CHECK_TIMEOUT) -> bool:
+    """Quick cv2 probe to see if an RTSP source is reachable before
+    handing it to InferencePipeline (which blocks indefinitely on hang)."""
+    if not str(url).startswith("rtsp://"):
+        return True   # files and webcams don't need pre-checking
     try:
-        import torch
-        if torch.cuda.is_available():
-            os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-            os.environ["ONNXRUNTIME_EXECUTION_PROVIDERS"] = (
-                "CUDAExecutionProvider,CPUExecutionProvider"
-            )
-            print(f"GPU: {torch.cuda.get_device_name(0)}")
-        else:
-            print("GPU: No CUDA — running on CPU")
-    except ImportError:
-        print("GPU: PyTorch not installed")
+        cap = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
+        cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, timeout * 1000)
+        cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, timeout * 1000)
+        ok = cap.isOpened()
+        cap.release()
+        return ok
+    except Exception:
+        return False
 
+
+_pipeline_ref = None   # module-level so _shutdown can reach it
+
+def _run_pipeline():
+    """Runs in a background daemon thread so Flask starts immediately.
+    Retries automatically if the source is temporarily unavailable."""
+    global PIPELINE_STATUS, PIPELINE_ERROR, _pipeline_ref
+
+    while True:
+        # --- RTSP pre-check ---
+        if str(VIDEO_SOURCE).startswith("rtsp://"):
+            print(f"[PIPELINE] Checking source reachability ({RTSP_CHECK_TIMEOUT}s timeout)...")
+            if not _check_rtsp(VIDEO_SOURCE):
+                with _status_lock:
+                    PIPELINE_STATUS = "error"
+                    PIPELINE_ERROR  = f"Source unreachable: {VIDEO_SOURCE}"
+                print(f"[PIPELINE] Source unreachable — retrying in {PIPELINE_RETRY_DELAY}s")
+                time.sleep(PIPELINE_RETRY_DELAY)
+                continue
+            print("[PIPELINE] Source reachable")
+
+        # --- Init + start ---
+        try:
+            with _status_lock:
+                PIPELINE_STATUS = "starting"
+                PIPELINE_ERROR  = None
+
+            pipeline = InferencePipeline.init(
+                api_key=RF_API_KEY,
+                model_id=RF_MODEL_ID,
+                video_reference=VIDEO_SOURCE,
+                on_prediction=handle_prediction,
+                max_fps=MAX_FPS,
+            )
+            _pipeline_ref = pipeline
+
+            with _status_lock:
+                PIPELINE_STATUS = "running"
+
+            print("[PIPELINE] Started")
+            pipeline.start()
+            pipeline.join()   # blocks until pipeline stops naturally
+
+        except Exception as e:
+            with _status_lock:
+                PIPELINE_STATUS = "error"
+                PIPELINE_ERROR  = str(e)
+            print(f"[PIPELINE] Error: {e} — retrying in {PIPELINE_RETRY_DELAY}s")
+
+        time.sleep(PIPELINE_RETRY_DELAY)
+
+
+if __name__ == "__main__":
     register_camera()
 
-    pipeline = InferencePipeline.init(
-        api_key=RF_API_KEY,
-        model_id=RF_MODEL_ID,
-        video_reference=VIDEO_SOURCE,
-        on_prediction=handle_prediction,
-        max_fps=MAX_FPS,
-    )
-    pipeline.start()
-    print("Roboflow pipeline started")
+    # Ctrl+C / SIGTERM — Flask + pipeline thread both need to die.
+    def _shutdown(sig, frame):
+        print("\n[SHUTDOWN] Stopping...")
+        with _status_lock:
+            global PIPELINE_STATUS
+            PIPELINE_STATUS = "stopped"
+        if _pipeline_ref:
+            try:
+                _pipeline_ref.stop()
+            except Exception:
+                pass
+        stop_siren()
+        os._exit(0)
 
-    print("Server running")
+    signal.signal(signal.SIGINT,  _shutdown)
+    signal.signal(signal.SIGTERM, _shutdown)
+
+    # Pipeline runs in background — Flask starts immediately regardless
+    t = threading.Thread(target=_run_pipeline, daemon=True)
+    t.start()
+
+    print("[SERVER] Running")
     print("  Stream → http://localhost:5001/video_feed")
     print("  Alert  → http://localhost:5001/latest_alert")
-    app.run(host="0.0.0.0", port=5001, threaded=True)
+    print("  Status → http://localhost:5001/status")
+    app.run(host="0.0.0.0", port=5001, threaded=True, use_reloader=False)
