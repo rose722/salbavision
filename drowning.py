@@ -30,7 +30,8 @@ RF_MODEL_ID  = "aqw3rfaq3wcqrq2r/9"
 
 # 0 = default webcam | path/to/video.mp4 | "rtsp://..."
 # VIDEO_SOURCE = "rtsp://awts:888888@192.180.100.17:554/stream1"
-VIDEO_SOURCE = r"C:\Github Projects\DROWNING_DETECTION_SYSTEM\salbavision-v2\videos\video_20260401_132916.mp4"
+# VIDEO_SOURCE = r"C:\Github Projects\DROWNING_DETECTION_SYSTEM\salbavision-v2\videos\video_20260401_132916.mp4"
+VIDEO_SOURCE = r"C:\Github Projects\DROWNING_DETECTION_SYSTEM\salbavision-v2\videos\IMG_1205.MOV"
 
 MAX_FPS = 60
 
