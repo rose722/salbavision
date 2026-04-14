@@ -20,6 +20,12 @@
 # production
 /build
 
+# python
+venv/
+.venv/
+__pycache__/
+*.pyc
+
 # misc
 .DS_Store
 *.pem
