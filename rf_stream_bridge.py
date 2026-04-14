@@ -43,7 +43,7 @@ RF_MODEL_ID = "aqw3rfaq3wcqrq2r/9"
 # --- Video source ---
 # 0 = webcam | "rtsp://..." = IP camera | r"C:\path\to\video.mp4" = file
 # VIDEO_SOURCE = "rtsp://awts11:12345678@192.180.100.30:554/stream1"
-
+VIDEO_SOURCE = "rtsp://eirmonpaculan11@gmail.com:KURw%DaeM7dB08T7f4Cd@192.168.0.112:554/stream1"
 MAX_FPS = 15
 
 # --- Supabase ---
@@ -112,8 +112,8 @@ else:
 
 CLASS_COLORS_BGR = {
     "drowning":     (0, 0, 255),
-    "out of water": (0, 215, 255),
-    "swimming":     (0, 200, 0),
+    "out of water": (0, 255, 0),
+    "swimming":     (255, 0, 127),
 }
 
 # =============================================================================
@@ -272,31 +272,42 @@ def draw_predictions(frame: np.ndarray, predictions: list,
 def draw_status_overlay(frame: np.ndarray, scene_state: str,
                         best_drown: float, best_out: float, best_swim: float,
                         drown_count: int, out_count: int, swim_count: int) -> np.ndarray:
-    """OpenCV text overlay (same layout as stream_bridge.py)."""
+    """PIL text overlay — same font/style as drowning.py."""
+    pil = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+    draw = ImageDraw.Draw(pil)
+
     if alarm_active:
         status_text  = "DROWNING ALERT!"
-        status_color = (0, 0, 255)
+        status_color = (255, 0, 0)
     elif scene_state == "DROWNING":
         status_text  = "POSSIBLE DROWNING"
-        status_color = (0, 100, 255)
+        status_color = (255, 60, 0)
     elif scene_state == "OUT":
         status_text  = "PERSON OUT OF WATER"
-        status_color = (0, 215, 255)
+        status_color = (255, 200, 0)
     elif scene_state == "SWIMMING":
         status_text  = "SWIMMING DETECTED"
-        status_color = (0, 255, 0)
+        status_color = (0, 200, 0)
     else:
         status_text  = "SAFE / UNCERTAIN"
-        status_color = (180, 255, 180)
+        status_color = (0, 180, 0)
 
-    cv2.putText(frame, status_text,  (20, 35),  cv2.FONT_HERSHEY_SIMPLEX, 0.95, status_color, 2)
-    cv2.putText(frame,
-                f"Drown={best_drown:.2f} Out={best_out:.2f} Swim={best_swim:.2f}",
-                (20, 68), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2)
-    cv2.putText(frame,
-                f"History D={drown_count} O={out_count} S={swim_count}",
-                (20, 98), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 0), 2)
-    return frame
+    # Status badge
+    tb = draw.textbbox((0, 0), status_text, font=FONT)
+    tw, th = tb[2] - tb[0], tb[3] - tb[1]
+    draw.rectangle([10, 10, 10 + tw + 12, 10 + th + 8], fill=status_color)
+    draw.text((16, 14), status_text, font=FONT, fill="white")
+
+    # Confidence + history line
+    info = (f"D={best_drown:.2f}  O={best_out:.2f}  S={best_swim:.2f}"
+            f"    hist D={drown_count} O={out_count} S={swim_count}")
+    tb2 = draw.textbbox((0, 0), info, font=FONT_SM)
+    tw2, th2 = tb2[2] - tb2[0], tb2[3] - tb2[1]
+    y2 = 10 + th + 8 + 6
+    draw.rectangle([10, y2, 10 + tw2 + 12, y2 + th2 + 6], fill=(30, 30, 30))
+    draw.text((16, y2 + 3), info, font=FONT_SM, fill="white")
+
+    return cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
 
 
 # =============================================================================
