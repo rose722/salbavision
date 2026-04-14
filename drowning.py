@@ -16,6 +16,8 @@
 # =============================================================================
 
 import os
+import signal
+import atexit
 import platform
 import cv2
 import numpy as np
@@ -169,6 +171,10 @@ def handle_prediction(prediction_data, frame):
 
     if cv2.waitKey(1) & 0xFF == ord("q"):
         cv2.destroyAllWindows()
+        try:
+            pipeline.stop()
+        except Exception:
+            pass
         os._exit(0)
 
 
@@ -183,6 +189,18 @@ pipeline = InferencePipeline.init(
     on_prediction=handle_prediction,
     max_fps=MAX_FPS,
 )
+
+
+def _shutdown(sig=None, frame=None):
+    try:
+        pipeline.stop()
+    except Exception:
+        pass
+    cv2.destroyAllWindows()
+
+signal.signal(signal.SIGINT, _shutdown)
+signal.signal(signal.SIGTERM, _shutdown)
+atexit.register(_shutdown)
 
 pipeline.start()
 pipeline.join()
