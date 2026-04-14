@@ -16,6 +16,7 @@
 # =============================================================================
 
 import os
+import platform
 import cv2
 import numpy as np
 from inference import InferencePipeline
@@ -42,6 +43,47 @@ CLASS_COLORS_BGR = {
     "out of water": (0, 255, 0),
     "swimming":     (255, 0, 127),
 }
+
+# How much of the screen the window should occupy (0.0 – 1.0)
+WINDOW_SCALE = 0.667   # ~2/3 → 1080p monitor → ~720p window
+
+# =============================================================================
+# SCREEN RESOLUTION DETECTION
+# =============================================================================
+
+def get_screen_size():
+    """Return (width, height) of the primary monitor."""
+    try:
+        if platform.system() == "Windows":
+            import ctypes
+            user32 = ctypes.windll.user32
+            user32.SetProcessDPIAware()
+            return user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
+        else:
+            import tkinter as tk
+            root = tk.Tk()
+            root.withdraw()
+            w, h = root.winfo_screenwidth(), root.winfo_screenheight()
+            root.destroy()
+            return w, h
+    except Exception:
+        return 1920, 1080   # safe fallback
+
+
+def calc_window_size(frame_h, frame_w, screen_w, screen_h):
+    """Scale frame down to WINDOW_SCALE of the screen, never upscale."""
+    max_w = int(screen_w * WINDOW_SCALE)
+    max_h = int(screen_h * WINDOW_SCALE)
+    scale = min(max_w / frame_w, max_h / frame_h, 1.0)
+    return int(frame_w * scale), int(frame_h * scale)
+
+
+SCREEN_W, SCREEN_H = get_screen_size()
+print(f"[DISPLAY] Screen: {SCREEN_W}x{SCREEN_H}  →  window target: "
+      f"{int(SCREEN_W * WINDOW_SCALE)}x{int(SCREEN_H * WINDOW_SCALE)}")
+
+WINDOW_NAME  = "Drowning Detection"
+_win_ready   = False
 
 # =============================================================================
 # GPU SETUP
@@ -74,10 +116,25 @@ except OSError:
 # =============================================================================
 
 def handle_prediction(prediction_data, frame):
+    global _win_ready
+
     if hasattr(frame, "image"):
         frame = frame.image
     if not isinstance(frame, np.ndarray):
         return
+
+    fh, fw = frame.shape[:2]
+    win_w, win_h = calc_window_size(fh, fw, SCREEN_W, SCREEN_H)
+
+    # Create resizable window once
+    if not _win_ready:
+        cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
+        cv2.resizeWindow(WINDOW_NAME, win_w, win_h)
+        # Center on screen
+        cx = (SCREEN_W - win_w) // 2
+        cy = (SCREEN_H - win_h) // 2
+        cv2.moveWindow(WINDOW_NAME, cx, cy)
+        _win_ready = True
 
     pil_img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
     draw = ImageDraw.Draw(pil_img)
@@ -108,7 +165,7 @@ def handle_prediction(prediction_data, frame):
         draw.text((lx + 3, ly + 2), label, font=FONT, fill="white")
 
     out = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
-    cv2.imshow("Drowning Detection", out)
+    cv2.imshow(WINDOW_NAME, out)
 
     if cv2.waitKey(1) & 0xFF == ord("q"):
         cv2.destroyAllWindows()
