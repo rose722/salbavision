@@ -4,19 +4,37 @@ Set up an isolated Python environment for the detection scripts so dependencies 
 
 ---
 
-## Step 1 — Create the virtual environment
+## Step 1 — Check your Python version
 
-Run once from the `salbavision/` project root:
+```powershell
+python --version
+```
 
+**Python 3.12 is required.** The `inference` package does not support Python 3.13+.
+
+If you have Python 3.13, install Python 3.12 from [python.org](https://www.python.org/downloads/) (you can keep both versions installed side by side).
+
+---
+
+## Step 2 — Create the virtual environment
+
+Run once from the `salbavision/` project root.
+
+**If you only have Python 3.12:**
 ```bash
 python -m venv venv
+```
+
+**If you have multiple Python versions (e.g. 3.12 and 3.13):**
+```powershell
+py -3.12 -m venv venv
 ```
 
 This creates a `venv/` folder in the project directory.
 
 ---
 
-## Step 2 — Activate the virtual environment
+## Step 3 — Activate the virtual environment
 
 You must activate it every time you open a new terminal.
 
@@ -44,7 +62,7 @@ When active, your terminal prompt will show `(venv)` as a prefix.
 
 ---
 
-## Step 3 — Install dependencies
+## Step 4 — Install dependencies
 
 With the venv active:
 
@@ -66,7 +84,7 @@ pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
 
 ---
 
-## Step 4 — Run a script
+## Step 5 — Run a script
 
 With the venv still active:
 
