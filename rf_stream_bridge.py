@@ -42,8 +42,8 @@ RF_MODEL_ID = "aqw3rfaq3wcqrq2r/9"
 
 # --- Video source ---
 # 0 = webcam | "rtsp://..." = IP camera | r"C:\path\to\video.mp4" = file
-# VIDEO_SOURCE = "rtsp://awts11:12345678@192.180.100.30:554/stream1"
-VIDEO_SOURCE = "rtsp://eirmonpaculan11@gmail.com:KURw%DaeM7dB08T7f4Cd@192.168.0.112:554/stream1"
+VIDEO_SOURCE = "rtsp://awts11:12345678@192.168.1.16:554/stream1"
+# VIDEO_SOURCE = "rtsp://eirmonpaculan11@gmail.com:KURw%DaeM7dB08T7f4Cd@192.168.0.112:554/stream1"
 MAX_FPS = 15
 
 # --- Supabase ---
