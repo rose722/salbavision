@@ -49,8 +49,9 @@ RF_API_KEY  = "yYf0oFRqVThzJtqnC6D4"
 RF_MODEL_ID = "aqw3rfaq3wcqrq2r/9"
 
 # --- Video source ---
-# VIDEO_SOURCE = "rtsp://awts11:12345678@192.180.100.30:554/stream1"
-VIDEO_SOURCE = r"C:\Users\eirmo\Documents\freelance_systems\salbavision\videos\IMG_1205.MOV"
+# VIDEO_SOURCE = "rtsp://awts11:12345678@192.168.1.16:554/stream1"
+# VIDEO_SOURCE = r"C:\Users\eirmo\Documents\freelance_systems\salbavision\videos\IMG_1205.MOV"
+VIDEO_SOURCE = r"C:\Users\SHEEN\OneDrive\Documents\salbavision\videos\IMG_1205.MOV"
 
 # Loop video files (for dev / demo) so the stream never ends
 LOOP_VIDEO_FILES = True
